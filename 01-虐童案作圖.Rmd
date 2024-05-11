@@ -1,0 +1,147 @@
+---
+title: '03'
+author: "chiatzu"
+date: '2024-03-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+```{r}
+library(tidyverse)
+library(stringr)
+library(ggplot2)
+library(showtext)
+library(ggthemes)
+library(patchwork)
+
+library(sf)
+
+
+
+library(hrbrthemes)
+library(GGally)
+library(viridis)
+
+library(httr)
+library(rvest) # for traversing html structure
+library(jsonlite)
+
+showtext_auto(enable = TRUE)
+font_add("GenJyuuGothic Heavy","GenJyuuGothic-Heavy.ttf")
+font_add("GenJyuuGothic Medium","GenJyuuGothic-Medium.ttf")
+font_add("GenJyuuGothic Light", "GenJyuuGothic-Light.ttf")
+font_add("jf-jinxuan-3.0 ExtraBold","jf-jinxuan-3.0-extrabold.otf")
+font_add("jf-jinxuan-3.0 medium","jf-jinxuan-3.0-medium.otf")
+font_add("jf-jinxuan-3.0 Book", "jf-jinxuan-3.0-book.otf")
+
+
+
+th <- 
+  theme(
+    plot.title = element_text(size=36, family="jf-jinxuan-3.0 ExtraBold", color="#3E3B3A"),
+    plot.subtitle = element_text(size=17,family="jf-jinxuan-3.0 medium", margin = margin(7, 1, 20, 0), color="#3E3B3A" ),
+    axis.title.x = element_text(size=16,family="jf-jinxuan-3.0 ExtraBold", color="#3E3B3A"),
+    axis.title.y = element_text(size=16,family="jf-jinxuan-3.0 ExtraBold", color="#3E3B3A"),
+    axis.text.x = element_text(size=16,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    axis.text.y = element_text(size=16,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    legend.text = element_text(size=16,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    legend.title = element_text(size=16,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    plot.caption  = element_text(color="#888888",size=8,family="jf-jinxuan-3.0 medium", ), #hjust = 1.1, vjust=-7
+    plot.title.position = "plot", # 讓字從最左邊出現
+    plot.margin = margin(2.5, 2.5, 2.5, 2.5, "lines"), # 調整主圖表外的margin
+    
+    legend.background = element_rect(fill = "#DDD5BB", color="black"),
+    plot.background = element_rect( fill = "#DDD5BB", colour = "#5C5755", size = 10 ),
+    panel.background = element_rect(fill = "#DDD5BB"), 
+  )
+
+
+```
+
+
+```{r fig.height=3, fig.width=3}
+df_content <- read_csv("./data/all_tokenized_article_unnested.csv") %>% select(date, media, title, link , article,word=title_s_token ) %>%
+  mutate(
+    media = if_else(is.na(media), "TVBS", media)
+  )
+
+df_verb <- read_csv("./result/動詞.csv") %>% select(word=`0`) %>%
+  mutate(word = str_trim(word))
+df_verb %>% count(word) %>% arrange(-n) %>%
+  filter(n>=10) %>%
+  filter(!str_detect(word, "惡|看|有|想|見|説|說|出養|死|訪視|獵|提|受虐|當")) %>%
+  filter(word != "虐") %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot() + aes(x=n, y=word) + 
+  geom_col() + 
+  labs(
+    x="次數",
+    y="",
+    title='三媒體下標最愛用的 "動詞" ',
+    subtitle="",
+    # caption = "區域立委台灣民眾黨名義上雖無推派候選人，但輔選無黨籍柯美蘭。"
+  ) +
+  theme_classic() + th +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=32, family="jf-jinxuan-3.0 ExtraBold", margin = margin(15, 0, 0, 0)),
+    plot.subtitle = element_text(size=17,family="jf-jinxuan-3.0 medium", margin = margin(7, 1, 15, 0) ),
+    axis.text.x = element_text(size=16,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    axis.text.y = element_text(size=18,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+  ) 
+```
+
+```{r}
+example <-df_content %>% select(media, title) %>% unique() %>%
+  filter(str_detect(title, "批")) 
+
+example$title[12]
+```
+
+
+```{r fig.height=3, fig.width=3}
+ranking_value <- read_csv("./result/提及社工_ettoday.csv") %>%
+      count(label) %>% arrange(desc(n)) %>%
+      mutate(
+        ranking = min_rank(n)
+      ) %>% select(label, ranking)
+
+read_csv("./result/提及社工_ettoday.csv") %>%
+  mutate(date = as.character(as.Date(date))) %>%
+  count(date, label) %>%
+  left_join(ranking_value) %>%
+  mutate(label = reorder(label, ranking))  %>%
+  mutate(n = as.integer(n)) %>%
+  ggplot() + aes(x=n, y=label, fill=date) +
+  geom_col(position = position_stack(reverse = TRUE)) +
+  scale_fill_manual(
+    values = c( "2024-03-13"="#373E5C", "2024-03-12" = "#9B95DB")
+    )  +
+  labs(
+    title = '"社工" 前後兩日風向大轉變',
+    subtitle = "ETtoday報導中，3/12多批評，3/13以聲援與上銬爭議為主",
+    x = '次數',
+    y = ''
+  ) +
+  scale_x_continuous(breaks = seq(from = 0, to = 10, by = 5) ) +
+  theme_classic() + th +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=32, family="jf-jinxuan-3.0 ExtraBold", margin = margin(15, 0, 0, 0)),
+    plot.subtitle = element_text(size=17,family="jf-jinxuan-3.0 medium", margin = margin(7, 1, 15, 0) ),
+    axis.text.x = element_text(size=12,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+    axis.text.y = element_text(size=14,family="jf-jinxuan-3.0 medium", color="#3E3B3A"),
+  ) 
+
+```
+
+
+
+
+
+
+

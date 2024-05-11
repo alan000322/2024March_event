@@ -1,0 +1,324 @@
+---
+title: "00-scrape_news"
+author: "chiatzu"
+date: '2024-03-13'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(httr)
+library(rvest)
+library(tidyverse)
+```
+
+## ET Today 爬蟲
+
+```{r}
+date_line <- "2024-04-02"
+
+content_ettoday <- readxl::read_excel( str_c("./寶林茶室/data/ettoday_news_", str_replace_all(date_line, "-", ""), ".xlsx") ) %>%
+  mutate( date = as.POSIXct(date) ) %>% 
+  rename( "title" =  "tablescraper-selected-row") %>%
+  rename( "link" = "tablescraper-selected-row href") %>%
+  filter(date > date_line & date < (as.Date(date_line)+1) ) %>%
+  mutate(date = as.character(date)) %>%
+  mutate( media = "ettoday")
+
+search_term <- "寶林|米酵菌酸|食物中毒|食品中毒|A13|邦克列酸"
+
+content_ettoday %>%
+  filter(str_detect(title, search_term))
+
+# content_ettoday %>%
+#   filter(!str_detect(title, search_term))
+```
+
+
+```{r}
+focus_ettoday <- content_ettoday %>%
+  filter(str_detect(title, search_term))
+
+focus_ettoday %>% 
+  write_rds(str_c("./寶林茶室/BAK/", date_line,"-ettoday寶林標題.rds"))
+
+focus_ettoday %>%
+  mutate(date = as.character(date)) %>%
+  write_csv(str_c("./寶林茶室/BAK/", date_line,"-ettoday寶林標題.csv"))
+
+content_ettoday %>%
+  mutate(date = as.character(date)) %>%
+  write_csv(str_c("./寶林茶室/BAK/", date_line,"-ettoday標題.csv"))
+
+content_ettoday %>% 
+  write_rds(str_c("./寶林茶室/BAK/", date_line,"-ettoday標題.rds"))
+```
+
+### 事件合併檔
+```{r}
+Combined_search <- tibble()
+for (line in list.files("./寶林茶室/BAK/", pattern = "寶林標題.rds") ) {
+  print(line)
+  TT <- read_rds(str_c("./寶林茶室/BAK/" , line) )
+  Combined_search <- bind_rows(Combined_search, TT)
+}
+
+Combined_search # 合併的資料
+Combined_search %>% write_csv("./寶林茶室/data/ettoday_news_寶林all(-0403).csv")
+
+
+
+all_news <- tibble()
+for (line in list.files("./寶林茶室/BAK/", pattern = "ettoday標題.rds") ) {
+  print(line)
+  TT <- read_rds(str_c("./寶林茶室/BAK/" , line) )
+  all_news <- bind_rows(all_news, TT)
+}
+all_news
+all_news %>% write_csv("./寶林茶室/data/ettoday_news_all(-0403).csv")
+```
+
+### 資料太多，分channel
+```{r}
+date_line <- "2024-04-03"
+content_ettoday <- tibble()
+
+for (line in list.files("./寶林茶室/data/20240403", pattern = ".xlsx") ) {
+  print(line)
+  
+  line_path <- str_c("./寶林茶室/data/20240403/", line)
+  
+  c <- readxl::read_excel( line_path ) %>%
+    mutate( date = as.POSIXct(date) ) %>% 
+    rename( "title" =  "tablescraper-selected-row") %>%
+    rename( "link" = "tablescraper-selected-row href") %>%
+    filter(date > date_line & date < (as.Date(date_line)+1) ) %>%
+    mutate(date = as.character(date)) %>%
+    mutate( media = "ettoday")
+  
+  content_ettoday <- bind_rows(c, content_ettoday)
+}
+
+content_ettoday
+```
+
+
+### 爬內文
+```{r}
+# Combined_search <- focus_ettoday
+Combined_search <- tibble()
+for (line in list.files("./寶林茶室/BAK/", pattern = "寶林標題.rds") ) {
+  print(line)
+  TT <- read_rds(str_c("./寶林茶室/BAK/" , line) )
+  Combined_search <- bind_rows(Combined_search, TT)
+}
+
+
+
+Result_et <- read_rds("./寶林茶室/BAK/ettoday_news__allcontent.rds")
+
+# Result_et <- tibble()
+for (i in c(93:length(Combined_search$link) ) ) {
+  print(i)
+  print(  100*(i/length(Combined_search$link) ))
+  title_t <- Combined_search$title[i]
+  print( Combined_search$link[i]  )
+  info <- Combined_search$link[i] %>% read_html()
+  article <- info %>% html_nodes("div.story > p:nth-child(n)") %>% html_text2() %>% paste(collapse = " ")
+  Tmp <- tibble(title=title_t, article)
+  Result_et <- bind_rows(Result_et, Tmp)
+
+  rand_num <- runif(1, 1, 20)
+  print(rand_num)
+  Sys.sleep( rand_num )
+}
+
+R_et <- Combined_search %>% left_join(Result_et, by="title") 
+
+Result_et %>%
+  filter(is.na(date)) %>% select(title, article) %>%
+  left_join(Combined_search %>% select(date, title, link) , by="title") %>%
+  bind_rows(
+    Result_et %>% filter(!is.na(date))
+  ) %>% distinct() %>% select(date, title, link, article) %>%
+  mutate(article_new = str_sub(article, 1, str_locate(article, " ▸ ")[1] - 1)) #%>%
+  # write_csv(
+  #   str_c("./寶林茶室/BAK/ettoday_news_"  , "_allcontent.csv")
+  #   )
+
+R_final <- Result_et %>%
+  mutate(article_new = str_sub(article, 1, str_locate(article, " ▸ ")[1] - 1)) 
+
+
+R_final %>%
+  write_rds(
+    str_c("./寶林茶室/BAK/ettoday_news_"  , "_allcontent.rds")
+  )
+R_final %>% 
+  write_csv(
+    str_c("./寶林茶室/BAK/ettoday_news_"  , "_allcontent.csv")
+    )
+
+```
+
+
+
+
+
+
+
+## setn 爬蟲
+```{r}
+date_line <- "2024-03-12"
+date_line_trim <- str_replace_all(date_line, "-" , "")
+
+content_setn <- readxl::read_excel(str_c("./data/setn_news_", date_line_trim, ".xlsx")) %>%
+  mutate( date = str_c("2024/", date)) %>%
+  mutate( date = as.POSIXct(date) ) %>% 
+  filter(date > as.Date(date_line) & date < as.Date(date_line)+1 ) %>%
+  mutate( date = as.character(date)) %>%
+  mutate(media = "setn")
+  
+focus_setn <- content_setn %>%
+  filter(str_detect(title, "社工|虐|保母|凱凱|兒盟|剴剴|兒福聯盟"))
+
+focus_setn %>% count(tag)
+
+
+focus_setn %>%
+  mutate(date = as.character(date)) %>%
+  write_csv( str_c("./BAK/", date_line, "-setn虐童案標題.csv" ) )
+
+focus_setn %>% 
+  write_rds(str_c("./BAK/", date_line,"-setn虐童案標題.rds"))
+
+
+
+
+
+content_setn %>%
+  mutate(date = as.character(date)) %>%
+  write_csv(str_c("./BAK/", date_line,"-setn標題.csv"))
+
+content_setn %>% 
+  write_rds(str_c("./BAK/", date_line,"-setn標題.rds"))
+```
+
+```{r}
+Result_setn <- tibble()
+for (i in c(1:nrow(focus_setn)) ) {
+  title <- focus_setn$title
+  print( focus_setn$link[i]  )
+  info <- focus_setn$link[i] %>% read_html()
+  
+  
+  ### 處理 article
+  if ( str_detect(focus_setn$link[i], "https://star") ) { # 如果是娛樂星聞
+    article <- info %>% html_nodes("article > p:nth-child(n)") %>% html_text2() %>% paste(collapse = " ") #娛樂
+  } # // if
+  else { #其他三立主站
+    article <- info %>% html_nodes("#Content1 > p:nth-child(n)") %>% html_text2() %>% paste(collapse = " ") 
+  } # // else
+  
+  
+  
+  Tmp <- tibble(title=title[i], article)
+  Result_setn <- bind_rows(Result_setn, Tmp)
+
+  rand_num <- runif(1, 1, 10)
+  print(rand_num)
+  Sys.sleep( rand_num )
+}
+
+R_setn <- focus_setn %>% left_join(Result_setn, by="title")
+
+
+
+R_setn %>%
+  write_rds(
+    str_c("./BAK/setn_news_", date_line_trim  , "_content.rds")
+  )
+R_setn %>% 
+  write_csv(
+    str_c("./BAK/setn_news_", date_line_trim  , "_content.csv")
+    )
+
+
+```
+
+
+## tvbs 爬蟲
+```{r}
+date_line <- "2024-03-12"
+date_line_trim <- str_replace_all(date_line, "-" , "")
+
+content_tvbs <- readxl::read_excel( str_c("./data/tvbs_news_", date_line_trim, ".xlsx") ) %>%
+  select(date, tag, title, link)  %>%
+  mutate(media = "tvbs")
+  
+focus_tvbs <- content_tvbs %>%
+  filter(str_detect(title, "社工|虐|保母|凱凱|兒盟|剴剴|兒福聯盟"))
+
+focus_tvbs %>% count(tag)
+
+
+
+
+
+focus_tvbs %>%
+  mutate(date = as.character(date)) %>%
+  write_csv( str_c("./BAK/", date_line, "-tvbs虐童案標題.csv" ) )
+
+focus_tvbs %>% 
+  write_rds(str_c("./BAK/", date_line,"-tvbs虐童案標題.rds"))
+
+
+
+
+
+content_tvbs %>%
+  mutate(date = as.character(date)) %>%
+  write_csv(str_c("./BAK/", date_line,"-tvbs標題.csv"))
+
+content_tvbs %>% 
+  write_rds(str_c("./BAK/", date_line,"-tvbs標題.rds"))
+
+```
+
+```{r}
+Result_tvbs <- tibble()
+for (i in c(1:nrow(focus_tvbs)) ) { # nrow(focus_tvbs)
+  title <- focus_tvbs$title
+  print( focus_tvbs$link[i]  )
+  info <- focus_tvbs$link[i] %>% read_html()
+  
+  chinese_pattern <- "[\u4e00-\u9fa5]+"
+  article <- info %>% html_nodes("#news_detail_div") %>% html_text2() %>% paste(collapse = " ") %>% 
+    str_split_1("\n&nbsp\n") %>%
+    sub("if\\(detectmob.*", "", .) %>% 
+    str_replace_all("\n", "") %>%  paste(collapse = " ") %>%
+    sub(" 快加入我，娛樂頭條.*", "", .) 
+    
+
+  
+  
+  Tmp <- tibble(title=title[i], article)
+  Result_tvbs <- bind_rows(Result_tvbs, Tmp)
+
+  rand_num <- runif(1, 1, 10)
+  print(rand_num)
+  Sys.sleep( rand_num )
+}
+
+R_tvbs <- focus_tvbs %>% left_join(Result_tvbs, by="title")
+R_tvbs %>% write_csv( str_c("./data/tvbs_news_", date_line_trim , "_content.csv") )
+```
+
+
+
+
